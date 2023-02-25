@@ -1,0 +1,181 @@
+function normalize(val, min, max)
+	local d = 100*(val-min)/(max-min)
+	if d < 0 then
+		return 0
+	end
+	return d
+end
+
+function normalizeMP(val)
+	if val > 100 then
+		val = 100
+	elseif val < 1 then
+		val  = 1
+	end
+	return val
+end
+
+function read_if_exist(section, value, default)
+		local ltx = system_ini()
+		if ltx:section_exist(section) and ltx:line_exist(section,value) then
+		return ltx:r_float(section,value)
+	else
+		return default
+	end
+end
+
+function read_float(wpn_section, upgr_sections, param, else_param)
+	local ltx = system_ini()
+	local res
+	if not else_param then
+		res = ltx:r_float(wpn_section, param)
+	else
+		res = read_if_exist(wpn_section, param, nil) or ltx:r_float(wpn_section, else_param)
+	end
+
+	if upgr_sections == nil or upgr_sections == "" then
+		return res
+	end
+
+	for k, sect in pairs(parse_names(upgr_sections)) do
+		if param == "hit_power" then
+			if res < read_if_exist(sect, param, 0) then
+				res = read_if_exist(sect, param, 0)
+			end
+		else
+			res = res + read_if_exist(sect, param, 0)
+		end
+	end
+	return res
+end
+
+function read_string(wpn_section, upgr_sections, param, default_param)
+	local ltx = system_ini()
+	local res = default_param
+	if ltx:line_exist(wpn_section, param) then
+		res = ltx:r_string(wpn_section, param)
+	end
+	if upgr_sections== nil or upgr_sections=="" then
+		return res
+	end
+	for k, sect in pairs(parse_names(upgr_sections)) do
+		if ltx:line_exist(sect, param) then
+			res = ltx:r_string(sect, param)
+		end
+	end
+	return res
+end
+
+function limit(value, min, max)
+	if value<min then
+		value = min
+	elseif value>max then
+		value = max
+	end
+	return value
+end
+
+function GetRPM(wpn_section, upgr_sections) -- скорострельность
+	local rpm = read_float(wpn_section, upgr_sections, "rpm")
+	return normalize(rpm, 0, 1150)
+end
+
+function GetDamage(wpn_section, upgr_sections) -- повреждение
+	local hit_power = read_float(wpn_section, upgr_sections, "hit_power")
+	return normalize(hit_power, 0, 0.9)
+end
+
+function GetDamageMP(wpn_section, upgr_sections) -- ??? (повреждениеMP)
+	local hit_power = read_float(wpn_section, upgr_sections, "hit_power")
+	hit_power = hit_power * 100
+	return normalizeMP(hit_power)
+end
+
+function GetHandling(wpn_section, upgr_sections) -- удобность
+	local ltx = system_ini()
+	local crosshair_inertion = 1
+	if ltx:line_exist(wpn_section,"crosshair_inertion") then
+		crosshair_inertion = read_float(wpn_section, upgr_sections, "crosshair_inertion")
+	end
+	crosshair_inertion = 11.9 - crosshair_inertion
+	return normalize(crosshair_inertion, 0, 10.5)
+end
+
+function GetAccuracy(wpn_section, upgr_sections) -- точность
+	local fire_dispersion_base = read_float(wpn_section, upgr_sections, "fire_dispersion_base")
+	fire_dispersion_base = 0.85 - fire_dispersion_base
+	return normalize(fire_dispersion_base, 0.375, 0.8)
+end
+
+function GetBulletSpeed(wpn_section, upgr_sections) -- настильность
+	local bullet_speed = read_float(wpn_section, upgr_sections, "bullet_speed")
+	return normalize(bullet_speed, 100, 1000)
+end
+
+function GetRecoil(wpn_section, upgr_sections) -- отдача
+	local fire_modes				= read_string(wpn_section, upgr_sections, "fire_modes", "1")
+	fire_modes						= parse_nums(fire_modes)
+	local auto_mode					= false
+	local custom_mode				= false
+	for k, v in pairs(fire_modes) do
+		if v==-1 then
+			auto_mode				= true
+		end
+		if v>1 then
+			custom_mode				= true
+		end
+	end
+	local cam_dispersion			= read_float(wpn_section, upgr_sections, "cam_dispersion")
+	local cam_dispersion_inc		= read_float(wpn_section, upgr_sections, "cam_dispersion_inc")
+	local cam_step_angle_horz		= read_float(wpn_section, upgr_sections, "cam_step_angle_horz")
+	local cam_max_angle_horz		= read_float(wpn_section, upgr_sections, "cam_max_angle_horz")
+	local zoom_cam_dispersion		= read_float(wpn_section, upgr_sections, "zoom_cam_dispersion", "cam_dispersion")
+	local zoom_cam_dispersion_inc	= read_float(wpn_section, upgr_sections, "zoom_cam_dispersion_inc", "cam_dispersion_inc")
+	local zoom_cam_step_angle_horz	= read_float(wpn_section, upgr_sections, "zoom_cam_step_angle_horz", "cam_step_angle_horz")
+	local zoom_cam_max_angle_horz	= read_float(wpn_section, upgr_sections, "zoom_cam_max_angle_horz", "cam_max_angle_horz")
+	
+	-- ?л¤ автоматического оружи¤ (auto_mode) важна отдача при стрельбе очеред¤ми
+	-- ?л¤ оружи¤ с режимами стрельбы с отсечкой по 2, по 3 патрона (custom_mode) важность отдачи равностепенна
+	-- ?л¤ оружи¤ только с одиночным режимом стрельбы наиболее важна отдача при первом выстреле
+	if auto_mode then
+		cam_dispersion					= normalize(cam_dispersion,				0.0, 3.0) * 1.00
+		cam_dispersion_inc				= normalize(cam_dispersion_inc,			0.0, 1.5) * 2.00
+		cam_step_angle_horz				= normalize(cam_step_angle_horz,		0.0, 1.8) * 0.75
+		cam_max_angle_horz				= normalize(cam_max_angle_horz,			0.0, 9.0) * 0.25
+		zoom_cam_dispersion				= normalize(zoom_cam_dispersion,		0.0, 2.0) * 1.00
+		zoom_cam_dispersion_inc			= normalize(zoom_cam_dispersion_inc,	0.0, 1.0) * 2.00
+		zoom_cam_step_angle_horz		= normalize(zoom_cam_step_angle_horz,	0.0, 1.2) * 0.75
+		zoom_cam_max_angle_horz			= normalize(zoom_cam_max_angle_horz,	0.0, 6.0) * 0.25
+	elseif custom_mode then
+		cam_dispersion					= normalize(cam_dispersion,				0.0, 3.0) * 1.50
+		cam_dispersion_inc				= normalize(cam_dispersion_inc,			0.0, 1.5) * 1.50
+		cam_step_angle_horz				= normalize(cam_step_angle_horz,		0.0, 1.8) * 0.75
+		cam_max_angle_horz				= normalize(cam_max_angle_horz,			0.0, 9.0) * 0.25
+		zoom_cam_dispersion				= normalize(zoom_cam_dispersion,		0.0, 2.0) * 1.50
+		zoom_cam_dispersion_inc			= normalize(zoom_cam_dispersion_inc,	0.0, 1.0) * 1.50
+		zoom_cam_step_angle_horz		= normalize(zoom_cam_step_angle_horz,	0.0, 1.2) * 0.75
+		zoom_cam_max_angle_horz			= normalize(zoom_cam_max_angle_horz,	0.0, 6.0) * 0.25
+	else
+		cam_dispersion					= normalize(cam_dispersion,				0.0, 3.0) * 2.00
+		cam_dispersion_inc				= normalize(cam_dispersion_inc,			0.0, 1.5) * 1.00
+		cam_step_angle_horz				= normalize(cam_step_angle_horz,		0.0, 1.8) * 0.75
+		cam_max_angle_horz				= normalize(cam_max_angle_horz,			0.0, 9.0) * 0.25
+		zoom_cam_dispersion				= normalize(zoom_cam_dispersion,		0.0, 2.0) * 2.00
+		zoom_cam_dispersion_inc			= normalize(zoom_cam_dispersion_inc,	0.0, 1.0) * 1.00
+		zoom_cam_step_angle_horz		= normalize(zoom_cam_step_angle_horz,	0.0, 1.2) * 0.75
+		zoom_cam_max_angle_horz			= normalize(zoom_cam_max_angle_horz,	0.0, 6.0) * 0.25
+	end
+	
+	cam_dispersion					= limit(cam_dispersion, 0, 100)
+	cam_dispersion_inc				= limit(cam_dispersion_inc, 0, 100)
+	cam_step_angle_horz				= limit(cam_step_angle_horz, 0, 100)
+	cam_max_angle_horz				= limit(cam_max_angle_horz, 0, 100)
+	zoom_cam_dispersion				= limit(zoom_cam_dispersion, 0, 100)
+	zoom_cam_dispersion_inc			= limit(zoom_cam_dispersion_inc, 0, 100)
+	zoom_cam_step_angle_horz		= limit(zoom_cam_step_angle_horz, 0, 100)
+	zoom_cam_max_angle_horz			= limit(zoom_cam_max_angle_horz, 0, 100)
+	
+	local general_value = cam_dispersion + cam_dispersion_inc + cam_step_angle_horz + cam_max_angle_horz + zoom_cam_dispersion + zoom_cam_dispersion_inc + zoom_cam_step_angle_horz + zoom_cam_max_angle_horz
+	
+	return normalize(general_value, 0, 800)
+end
